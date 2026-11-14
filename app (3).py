@@ -1,7 +1,7 @@
 """
 Multi-Gaussian Peak Fitting — Streamlit App
-執行方式:  streamlit run app.py
-需求套件:  pip install streamlit numpy pandas scipy matplotlib
+Run:       streamlit run app.py
+Requires:  pip install streamlit numpy pandas scipy matplotlib
 """
 import io
 import os
@@ -20,10 +20,10 @@ FWHM_FACTOR = 2.0 * np.sqrt(2.0 * np.log(2.0))  # ≈ 2.3548
 
 
 # ----------------------------------------------------------------------------
-# 核心函式
+# Core functions
 # ----------------------------------------------------------------------------
 def build_model(n_peaks: int, offset: bool):
-    """回傳 n 個高斯疊加(可含常數基線)的模型函式。參數順序: A1,mu1,s1,...,[c]"""
+    """Return a model function for n summed Gaussians (optional constant baseline). Parameter order: A1,mu1,s1,...,[c]"""
 
     def model(x, *p):
         y = np.zeros_like(x, dtype=float)
@@ -38,11 +38,11 @@ def build_model(n_peaks: int, offset: bool):
 
 
 def read_xy(file, has_header: bool, xcol: int, ycol: int):
-    """讀取 CSV，回傳排序後、無 NaN 的 (x, y) numpy arrays。"""
+    """Read a CSV and return sorted, NaN-free (x, y) numpy arrays."""
     file.seek(0)
     df = pd.read_csv(file, header=0 if has_header else None, sep=None, engine="python")
     if df.shape[1] <= max(xcol, ycol):
-        raise ValueError(f"檔案只有 {df.shape[1]} 欄，無法讀取第 {max(xcol, ycol)} 欄(從 0 起算)")
+        raise ValueError(f"File has only {df.shape[1]} columns; cannot read column {max(xcol, ycol)} (0-based)")
     x = pd.to_numeric(df.iloc[:, xcol], errors="coerce")
     y = pd.to_numeric(df.iloc[:, ycol], errors="coerce")
     m = x.notna() & y.notna()
@@ -55,12 +55,12 @@ def fit_one(x, y, peaks, offset=False, allow_neg_A=False,
             window="all", margin_pct=10.0, max_nfev=20000):
     """
     peaks: list of (x_min, x_max, mu_init)
-    回傳 dict，內含擬合參數表、曲線資料、R² 等；失敗時含 'error'。
+    Returns a dict with the fitted-parameter table, curve data, R², etc.; contains 'error' on failure.
     """
     n = len(peaks)
     result = {"n_peaks": n}
 
-    # --- 擬合區間 ---
+    # --- Fit window ---
     if window == "peaks":
         lo_all = min(p[0] for p in peaks)
         hi_all = max(p[1] for p in peaks)
@@ -71,7 +71,7 @@ def fit_one(x, y, peaks, offset=False, allow_neg_A=False,
     xf, yf = x[mask], y[mask]
     n_par = 3 * n + (1 if offset else 0)
     if len(xf) <= n_par:
-        result["error"] = f"擬合區間內資料點({len(xf)})不足以擬合 {n_par} 個參數"
+        result["error"] = f"Only {len(xf)} data points in the fit window; not enough to fit {n_par} parameters"
         return result
 
     dx = np.median(np.diff(xf)) if len(xf) > 1 else 1.0
@@ -79,7 +79,7 @@ def fit_one(x, y, peaks, offset=False, allow_neg_A=False,
     y_ptp = max(np.ptp(yf), 1e-12)
     base = float(np.min(yf)) if offset else 0.0
 
-    # --- 初始猜測與邊界 ---
+    # --- Initial guesses and bounds ---
     p0, lb, ub = [], [], []
     for lo, hi, mu0 in peaks:
         idx = int(np.argmin(np.abs(xf - mu0)))
@@ -100,12 +100,12 @@ def fit_one(x, y, peaks, offset=False, allow_neg_A=False,
     try:
         popt, pcov = curve_fit(model, xf, yf, p0=p0, bounds=(lb, ub), max_nfev=max_nfev)
     except Exception as e:  # noqa: BLE001
-        result["error"] = f"擬合失敗: {e}"
+        result["error"] = f"Fit failed: {e}"
         return result
 
     perr = np.sqrt(np.diag(pcov)) if np.all(np.isfinite(pcov)) else np.full(n_par, np.nan)
 
-    # --- 參數表 ---
+    # --- Parameter table ---
     rows = []
     for i in range(n):
         A, mu, s = popt[3 * i: 3 * i + 3]
@@ -119,14 +119,14 @@ def fit_one(x, y, peaks, offset=False, allow_neg_A=False,
         })
     params_df = pd.DataFrame(rows)
 
-    # --- 擬合品質 ---
+    # --- Fit quality ---
     fit_f = model(xf, *popt)
     ss_res = float(np.sum((yf - fit_f) ** 2))
     ss_tot = float(np.sum((yf - yf.mean()) ** 2))
     r2 = 1 - ss_res / ss_tot if ss_tot > 0 else np.nan
     rmse = float(np.sqrt(ss_res / len(xf)))
 
-    # --- 曲線資料(原始資料點上的值) ---
+    # --- Curve data (values at the original data points) ---
     c = popt[3 * n] if offset else 0.0
     curve = {"x": x, "y": y, "fit": model(x, *popt), "residual": y - model(x, *popt)}
     for i in range(n):
@@ -142,7 +142,7 @@ def fit_one(x, y, peaks, offset=False, allow_neg_A=False,
 
 
 def make_figure(x, y, res, peaks, title, show_ranges=True):
-    """產生擬合圖(上: 資料+擬合+各峰；下: 殘差)。"""
+    """Create the fit figure (top: data + fit + peaks; bottom: residuals)."""
     curve = res["curve"]
     n = res["n_peaks"]
     offset = res["offset"] or 0.0
@@ -185,7 +185,7 @@ def fig_to_bytes(fig, fmt, dpi=200):
 
 
 def df_to_csv_bytes(df: pd.DataFrame) -> bytes:
-    return df.to_csv(index=False).encode("utf-8-sig")  # utf-8-sig 讓 Excel 正確開啟
+    return df.to_csv(index=False).encode("utf-8-sig")  # utf-8-sig lets Excel open the file correctly
 
 
 def build_zip(results: list) -> bytes:
@@ -217,55 +217,58 @@ def build_zip(results: list) -> bytes:
 # ----------------------------------------------------------------------------
 def main():
     st.set_page_config(page_title="Multi-Gaussian Peak Fitting", layout="wide")
-    st.title("📈 多重高斯峰擬合 (Multi-Gaussian Fitting)")
-    st.caption("模型: y = Σ Aᵢ·exp(−(x−μᵢ)² / (2σᵢ²)) [+ 常數基線]")
+    st.title("📈 Multi-Gaussian Peak Fitting")
+    st.caption("Model: y = Σ Aᵢ·exp(−(x−μᵢ)² / (2σᵢ²)) [+ constant baseline]")
 
-    # ---------------- 側邊欄 ----------------
+    # ---------------- Sidebar ----------------
     with st.sidebar:
-        st.header("① 上傳資料")
-        files = st.file_uploader("選擇一或多個 CSV 檔 (含 x, y 兩欄)",
+        st.header("① Upload data")
+        files = st.file_uploader("Select one or more CSV files (with x and y columns)",
                                  type=["csv", "txt"], accept_multiple_files=True)
-        has_header = st.checkbox("檔案第一列為欄位名稱", value=True)
+        has_header = st.checkbox("First row of the file is a header", value=True)
         c1, c2 = st.columns(2)
-        xcol = c1.number_input("x 欄位 index", 0, 50, 0, help="從 0 開始計數")
-        ycol = c2.number_input("y 欄位 index", 0, 50, 1)
+        xcol = c1.number_input("x column index", 0, 50, 0, help="Counting starts at 0")
+        ycol = c2.number_input("y column index", 0, 50, 1)
 
-        st.header("④ 擬合選項")
-        offset = st.checkbox("加入常數基線 (offset)", value=False)
-        allow_neg = st.checkbox("允許負振幅 A", value=False)
-        window = st.radio("擬合資料範圍", ["全部資料", "僅峰範圍聯集(含邊界)"])
-        margin = st.slider("邊界延伸 (% of 範圍)", 0, 100, 20,
-                           disabled=(window == "全部資料"))
-        max_nfev = st.number_input("最大迭代次數 (max_nfev)", 100, 1_000_000, 20000, step=1000)
+        st.header("④ Fit options")
+        offset = st.checkbox("Add constant baseline (offset)", value=False)
+        allow_neg = st.checkbox("Allow negative amplitude A", value=False)
+        window = st.radio("Fit data range", ["All data", "Peak ranges only (with margin)"])
+        margin = st.slider("Margin extension (% of range)", 0, 100, 20,
+                           disabled=(window == "All data"))
+        max_nfev = st.number_input("Max iterations (max_nfev)", 100, 1_000_000, 20000, step=1000)
 
-        st.header("⑤ 圖檔選項")
-        dpi = st.slider("PNG 解析度 (dpi)", 72, 600, 200)
-        show_ranges = st.checkbox("圖上標示峰範圍", value=True)
+        st.header("⑤ Figure options")
+        dpi = st.slider("PNG resolution (dpi)", 72, 600, 200)
+        show_ranges = st.checkbox("Show peak ranges on figure", value=True)
+
+        st.divider()
+        st.caption("The development of this app is assisted by Claude.")
 
     if not files:
-        st.info("👈 請先在左側上傳 CSV 檔案。")
+        st.info("👈 Please upload CSV files in the sidebar first.")
         return
 
-    # ---------------- 讀取資料 ----------------
+    # ---------------- Read data ----------------
     data, errors = {}, {}
     for f in files:
         try:
             x, y = read_xy(f, has_header, int(xcol), int(ycol))
             if len(x) < 4:
-                raise ValueError("有效資料點少於 4 筆")
+                raise ValueError("Fewer than 4 valid data points")
             data[f.name] = (x, y)
         except Exception as e:  # noqa: BLE001
             errors[f.name] = str(e)
     for name, msg in errors.items():
-        st.error(f"❌ 無法讀取 {name}：{msg}")
+        st.error(f"❌ Could not read {name}: {msg}")
     if not data:
         return
 
-    # ---------------- 步驟 2: 峰數與範圍 ----------------
-    st.header("② 設定理論峰數與各峰 x 範圍")
+    # ---------------- Step 2: number of peaks and ranges ----------------
+    st.header("② Set the expected number of peaks and the x range of each peak")
     first_name = next(iter(data))
     x0, y0 = data[first_name]
-    n_peaks = int(st.number_input("理論峰數量", 1, 20, 2))
+    n_peaks = int(st.number_input("Expected number of peaks", 1, 20, 2))
 
     sig = (n_peaks, first_name, float(x0.min()), float(x0.max()))
     if st.session_state.get("peak_sig") != sig:
@@ -277,8 +280,8 @@ def main():
         })
         st.session_state["peak_sig"] = sig
 
-    st.markdown("請編輯下表：每列代表一個峰。`x_min`/`x_max` 為該峰 μ 的搜尋範圍，"
-                "`mu_init` 為 μ 的初始猜測值（需落在範圍內）。")
+    st.markdown("Edit the table below: each row is one peak. `x_min`/`x_max` are the search range for the peak's μ, "
+                "`mu_init` is the initial guess for μ (must lie within the range).")
     peak_df = st.data_editor(
         st.session_state["peak_default"],
         key=f"peak_editor_{hash(sig)}",
@@ -287,34 +290,34 @@ def main():
         column_config={
             "x_min": st.column_config.NumberColumn("x_min", format="%.6g"),
             "x_max": st.column_config.NumberColumn("x_max", format="%.6g"),
-            "mu_init": st.column_config.NumberColumn("mu_init (初始猜測)", format="%.6g"),
+            "mu_init": st.column_config.NumberColumn("mu_init (initial guess)", format="%.6g"),
         },
     )
 
-    # 驗證
+    # Validation
     valid = True
     peaks = []
     for i, r in peak_df.iterrows():
         lo, hi, mu = r["x_min"], r["x_max"], r["mu_init"]
         if pd.isna(lo) or pd.isna(hi):
-            st.error(f"Peak {i + 1}: x_min / x_max 不可為空")
+            st.error(f"Peak {i + 1}: x_min / x_max cannot be empty")
             valid = False
             continue
         if lo >= hi:
-            st.error(f"Peak {i + 1}: x_min 必須小於 x_max")
+            st.error(f"Peak {i + 1}: x_min must be smaller than x_max")
             valid = False
             continue
         if pd.isna(mu):
             mu = (lo + hi) / 2
         if not (lo <= mu <= hi):
-            st.error(f"Peak {i + 1}: mu_init 必須落在 [{lo:g}, {hi:g}] 內")
+            st.error(f"Peak {i + 1}: mu_init must lie within [{lo:g}, {hi:g}]")
             valid = False
             continue
         peaks.append((float(lo), float(hi), float(mu)))
 
-    # 預覽
-    with st.expander("🔍 資料預覽與峰範圍", expanded=True):
-        pv_name = st.selectbox("預覽檔案", list(data.keys()))
+    # Preview
+    with st.expander("🔍 Data preview and peak ranges", expanded=True):
+        pv_name = st.selectbox("Preview file", list(data.keys()))
         px, py = data[pv_name]
         fig, ax = plt.subplots(figsize=(8, 3.2))
         ax.plot(px, py, ".", ms=3, color="0.3")
@@ -329,15 +332,15 @@ def main():
         st.pyplot(fig)
         plt.close(fig)
 
-    # ---------------- 步驟 3-4: 執行擬合 ----------------
-    st.header("③ 執行擬合")
-    if st.button("🚀 開始擬合", type="primary", disabled=not valid):
+    # ---------------- Steps 3-4: run the fit ----------------
+    st.header("③ Run the fit")
+    if st.button("🚀 Start fitting", type="primary", disabled=not valid):
         results = []
-        progress = st.progress(0.0, text="擬合中…")
+        progress = st.progress(0.0, text="Fitting…")
         for k, (name, (x, y)) in enumerate(data.items()):
             res = fit_one(
                 x, y, peaks, offset=offset, allow_neg_A=allow_neg,
-                window="peaks" if window.startswith("僅") else "all",
+                window="peaks" if window.startswith("Peak") else "all",
                 margin_pct=margin, max_nfev=int(max_nfev),
             )
             res["name"] = name
@@ -349,19 +352,19 @@ def main():
                 res["pdf"] = fig_to_bytes(fig, "pdf")
                 plt.close(fig)
             results.append(res)
-            progress.progress((k + 1) / len(data), text=f"完成 {name}")
+            progress.progress((k + 1) / len(data), text=f"Finished {name}")
         progress.empty()
         st.session_state["results"] = results
 
-    # ---------------- 步驟 5-7: 顯示與下載 ----------------
+    # ---------------- Steps 5-7: display and download ----------------
     results = st.session_state.get("results")
     if not results:
         return
 
-    st.header("④ 擬合結果")
+    st.header("④ Fit results")
     ok = [r for r in results if "error" not in r]
     if ok:
-        st.download_button("📦 下載全部結果 (ZIP: 圖 + 表)", build_zip(results),
+        st.download_button("📦 Download all results (ZIP: figures + tables)", build_zip(results),
                            file_name="gaussian_fit_results.zip", mime="application/zip")
 
     tabs = st.tabs([r["name"] for r in results])
@@ -369,7 +372,7 @@ def main():
         with tab:
             if "error" in r:
                 st.error(r["error"])
-                st.caption("建議：調整峰範圍／初始猜測、啟用基線，或改用『僅峰範圍聯集』。")
+                st.caption("Suggestion: adjust the peak ranges / initial guesses, enable the baseline, or switch to 'Peak ranges only'.")
                 continue
 
             m1, m2, m3 = st.columns(3)
@@ -383,7 +386,7 @@ def main():
             d2.download_button("🖼 SVG", r["svg"], f"{r['stem']}_fit.svg", "image/svg+xml", key=f"svg{k}")
             d3.download_button("🖼 PDF", r["pdf"], f"{r['stem']}_fit.pdf", "application/pdf", key=f"pdf{k}")
 
-            st.subheader("擬合參數表")
+            st.subheader("Fit parameter table")
             st.dataframe(
                 r["params"].style.format({
                     "A": "{:.5g}", "mu": "{:.6g}", "sigma": "{:.5g}", "FWHM": "{:.5g}",
@@ -392,9 +395,9 @@ def main():
                 use_container_width=True, hide_index=True,
             )
             t1, t2 = st.columns(2)
-            t1.download_button("📄 下載參數表 (CSV)", df_to_csv_bytes(r["params"]),
+            t1.download_button("📄 Download parameter table (CSV)", df_to_csv_bytes(r["params"]),
                                f"{r['stem']}_params.csv", "text/csv", key=f"pcsv{k}")
-            t2.download_button("📄 下載擬合曲線資料 (CSV)", df_to_csv_bytes(r["curve"]),
+            t2.download_button("📄 Download fitted curve data (CSV)", df_to_csv_bytes(r["curve"]),
                                f"{r['stem']}_curves.csv", "text/csv", key=f"ccsv{k}")
 
 
